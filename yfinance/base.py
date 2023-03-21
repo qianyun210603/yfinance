@@ -177,7 +177,7 @@ class FastInfo:
         if fullDaysOnly and self._exchange_open_now():
             # Exclude today
             d1 -= utils._interval_to_timedelta("1d")
-        return self._prices_1y.loc[str(d0): str(d1)]
+        return self._prices_1y.loc[str(d0) : str(d1)]
 
     def _get_1wk_1h_prepost_prices(self):
         if self._prices_1wk_1h_prepost is None:
@@ -558,22 +558,22 @@ class TickerBase:
         return data
 
     def history(
-            self,
-            period="1mo",
-            interval="1d",
-            start=None,
-            end=None,
-            prepost=False,
-            actions=True,
-            auto_adjust=True,
-            back_adjust=False,
-            repair=False,
-            keepna=False,
-            proxy=None,
-            rounding=False,
-            timeout=10,
-            debug=True,
-            raise_errors=False,
+        self,
+        period="1mo",
+        interval="1d",
+        start=None,
+        end=None,
+        prepost=False,
+        actions=True,
+        auto_adjust=True,
+        back_adjust=False,
+        repair=False,
+        keepna=False,
+        proxy=None,
+        rounding=False,
+        timeout=10,
+        debug=True,
+        raise_errors=False,
     ) -> pd.DataFrame:
         """
         :Parameters:
@@ -716,9 +716,9 @@ class TickerBase:
         elif "chart" not in data or data["chart"]["result"] is None or not data["chart"]["result"]:
             fail = True
         elif (
-                period is not None
-                and "timestamp" not in data["chart"]["result"][0]
-                and period not in self._history_metadata["validRanges"]
+            period is not None
+            and "timestamp" not in data["chart"]["result"][0]
+            and period not in self._history_metadata["validRanges"]
         ):
             # User provided a bad period. The minimum should be '1d', but sometimes Yahoo accepts '1h'.
             err_msg = "Period '{}' is invalid, must be one of {}".format(period, self._history_metadata["validRanges"])
@@ -740,7 +740,7 @@ class TickerBase:
             if end and not quotes.empty:
                 endDt = _pd.to_datetime(_datetime.datetime.utcfromtimestamp(end))
                 if quotes.index[quotes.shape[0] - 1] >= endDt:
-                    quotes = quotes.iloc[0:quotes.shape[0] - 1]
+                    quotes = quotes.iloc[0 : quotes.shape[0] - 1]
         except Exception:
             shared._DFS[self.ticker] = utils.empty_df()
             shared._ERRORS[self.ticker] = err_msg
@@ -1015,7 +1015,7 @@ class TickerBase:
             i0 = df_good.index.get_indexer([g0], method="nearest")[0]
             if i0 > 0:
                 if (min_dt is None or df_good.index[i0 - 1] >= min_dt) and (
-                        (not intraday) or df_good.index[i0 - 1].date() == g0.date()
+                    (not intraday) or df_good.index[i0 - 1].date() == g0.date()
                 ):
                     i0 -= 1
             gl = g[-1]
@@ -1023,7 +1023,7 @@ class TickerBase:
             if il < len(df_good) - 1:
                 if (not intraday) or df_good.index[il + 1].date() == gl.date():
                     il += 1
-            good_dts = df_good.index[i0: il + 1]
+            good_dts = df_good.index[i0 : il + 1]
             dts_groups[i] += good_dts.to_list()
             dts_groups[i].sort()
 
@@ -1082,7 +1082,7 @@ class TickerBase:
                     print("YF: WARNING: Cannot reconstruct because Yahoo not returning data in interval")
                 continue
             # Discard the buffer
-            df_fine = df_fine.loc[g[0]: g[-1] + itds[sub_interval] - _datetime.timedelta(milliseconds=1)]
+            df_fine = df_fine.loc[g[0] : g[-1] + itds[sub_interval] - _datetime.timedelta(milliseconds=1)]
 
             df_fine["ctr"] = 0
             if interval == "1wk":
@@ -1835,8 +1835,8 @@ class TickerBase:
             q = self._quote.info["shortName"]
 
         url = (
-                "https://markets.businessinsider.com/ajax/"
-                "SearchController_Suggest?max_results=25&query=%s" % urlencode(q)
+            "https://markets.businessinsider.com/ajax/"
+            "SearchController_Suggest?max_results=25&query=%s" % urlencode(q)
         )
         data = self._data.cache_get(url=url, proxy=proxy).text
 
