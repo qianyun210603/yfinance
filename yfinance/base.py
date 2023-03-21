@@ -21,31 +21,28 @@
 
 from __future__ import print_function
 
-import time as _time
 import datetime as _datetime
-import dateutil as _dateutil
+import json as _json
+import time as _time
 from typing import Optional
-
-import pandas as _pd
-import numpy as _np
-import pandas as pd
-
-from .data import TickerData
-
 from urllib.parse import quote as urlencode
 
-from . import utils
+import dateutil.relativedelta as _relativedelta
+import numpy as _np
+import pandas as _pd
+import pandas as pd
 
-from . import shared
+from . import shared, utils
+from .data import TickerData
 from .scrapers.analysis import Analysis
 from .scrapers.fundamentals import Fundamentals
 from .scrapers.holders import Holders
 from .scrapers.quote import Quote
-import json as _json
 
-_BASE_URL_ = 'https://query2.finance.yahoo.com'
-_SCRAPE_URL_ = 'https://finance.yahoo.com/quote'
-_ROOT_URL_ = 'https://finance.yahoo.com'
+_BASIC_URL_ = "https://query1.finance.yahoo.com/v7/finance/quote"
+_BASE_URL_ = "https://query2.finance.yahoo.com"
+_SCRAPE_URL_ = "https://finance.yahoo.com/quote"
+_ROOT_URL_ = "https://finance.yahoo.com"
 
 
 class FastInfo:
@@ -94,55 +91,67 @@ class FastInfo:
         _properties += ["last_price", "previous_close", "open", "day_high", "day_low"]
         _properties += ["regular_market_previous_close"]
         _properties += ["last_volume"]
-        _properties += ["fifty_day_average", "two_hundred_day_average", "ten_day_average_volume", "three_month_average_volume"]
+        _properties += [
+            "fifty_day_average",
+            "two_hundred_day_average",
+            "ten_day_average_volume",
+            "three_month_average_volume",
+        ]
         _properties += ["year_high", "year_low", "year_change"]
 
-        # Because released before fixing key case, need to officially support 
+        # Because released before fixing key case, need to officially support
         # camel-case but also secretly support snake-case
-        base_keys = [k for k in _properties if not '_' in k]
+        base_keys = [k for k in _properties if "_" not in k]
 
-        sc_keys = [k for k in _properties if '_' in k]
+        sc_keys = [k for k in _properties if "_" in k]
 
-        self._sc_to_cc_key = {k:utils.snake_case_2_camelCase(k) for k in sc_keys}
-        self._cc_to_sc_key = {v:k for k,v in self._sc_to_cc_key.items()}
- 
+        self._sc_to_cc_key = {k: utils.snake_case_2_camelCase(k) for k in sc_keys}
+        self._cc_to_sc_key = {v: k for k, v in self._sc_to_cc_key.items()}
+
         self._public_keys = sorted(base_keys + list(self._sc_to_cc_key.values()))
         self._keys = sorted(self._public_keys + sc_keys)
 
     # dict imitation:
     def keys(self):
         return self._public_keys
+
     def items(self):
-        return [(k,self[k]) for k in self._public_keys]
+        return [(k, self[k]) for k in self._public_keys]
+
     def values(self):
         return [self[k] for k in self._public_keys]
+
     def get(self, key, default=None):
         if key in self.keys():
             if key in self._cc_to_sc_key:
                 key = self._cc_to_sc_key[key]
             return self[key]
         return default
+
     def __getitem__(self, k):
         if not isinstance(k, str):
             raise KeyError(f"key must be a string")
-        if not k in self._keys:
+        if k not in self._keys:
             raise KeyError(f"'{k}' not valid key. Examine 'FastInfo.keys()'")
+
         if k in self._cc_to_sc_key:
             k = self._cc_to_sc_key[k]
         return getattr(self, k)
+
     def __contains__(self, k):
         return k in self.keys()
+
     def __iter__(self):
         return iter(self.keys())
 
     def __str__(self):
         return "lazy-loading dict with keys = " + str(self.keys())
+
     def __repr__(self):
         return self.__str__()
 
     def toJSON(self, indent=4):
-        d = {k:self[k] for k in self.keys()}
-        return _json.dumps({k:self[k] for k in self.keys()}, indent=indent)
+        return _json.dumps({k: self[k] for k in self.keys()}, indent=indent)
 
     def _get_1y_prices(self, fullDaysOnly=False):
         if self._prices_1y is None:
@@ -150,10 +159,10 @@ class FastInfo:
             self._md = self._tkr.get_history_metadata()
             try:
                 ctp = self._md["currentTradingPeriod"]
-                self._today_open = pd.to_datetime(ctp["regular"]["start"], unit='s', utc=True).tz_convert(self.timezone)
-                self._today_close = pd.to_datetime(ctp["regular"]["end"], unit='s', utc=True).tz_convert(self.timezone)
+                self._today_open = pd.to_datetime(ctp["regular"]["start"], unit="s", utc=True).tz_convert(self.timezone)
+                self._today_close = pd.to_datetime(ctp["regular"]["end"], unit="s", utc=True).tz_convert(self.timezone)
                 self._today_midnight = self._today_close.ceil("D")
-            except:
+            except Exception:
                 self._today_open = None
                 self._today_close = None
                 self._today_midnight = None
@@ -168,16 +177,20 @@ class FastInfo:
         if fullDaysOnly and self._exchange_open_now():
             # Exclude today
             d1 -= utils._interval_to_timedelta("1d")
-        return self._prices_1y.loc[str(d0):str(d1)]
+        return self._prices_1y.loc[str(d0): str(d1)]
 
     def _get_1wk_1h_prepost_prices(self):
         if self._prices_1wk_1h_prepost is None:
-            self._prices_1wk_1h_prepost = self._tkr.history(period="1wk", interval="1h", auto_adjust=False, prepost=True, debug=False)
+            self._prices_1wk_1h_prepost = self._tkr.history(
+                period="1wk", interval="1h", auto_adjust=False, prepost=True, debug=False
+            )
         return self._prices_1wk_1h_prepost
 
     def _get_1wk_1h_reg_prices(self):
         if self._prices_1wk_1h_reg is None:
-            self._prices_1wk_1h_reg = self._tkr.history(period="1wk", interval="1h", auto_adjust=False, prepost=False, debug=False)
+            self._prices_1wk_1h_reg = self._tkr.history(
+                period="1wk", interval="1h", auto_adjust=False, prepost=False, debug=False
+            )
         return self._prices_1wk_1h_reg
 
     def _get_exchange_metadata(self):
@@ -254,7 +267,7 @@ class FastInfo:
         if self._shares is not None:
             return self._shares
 
-        shares = self._tkr.get_shares_full(start=pd.Timestamp.utcnow().date()-pd.Timedelta(days=548))
+        shares = self._tkr.get_shares_full(start=pd.Timestamp.utcnow().date() - pd.Timedelta(days=548))
         if shares is None:
             # Requesting 18 months failed, so fallback to shares which should include last year
             shares = self._tkr.get_shares()
@@ -292,14 +305,14 @@ class FastInfo:
         else:
             prices = prices[["Close"]].groupby(prices.index.date).last()
             if prices.shape[0] < 2:
-                # Very few symbols have previousClose despite no 
+                # Very few symbols have previousClose despite no
                 # no trading data e.g. 'QCSTIX'.
                 fail = True
             else:
                 self._prev_close = float(prices["Close"].iloc[-2])
         if fail:
             # Fallback to original info[] if available.
-            self._tkr.info  # trigger fetch
+            _ = self._tkr.info  # trigger fetch
             k = "previousClose"
             if self._tkr._quote._retired_info is not None and k in self._tkr._quote._retired_info:
                 self._prev_close = self._tkr._quote._retired_info[k]
@@ -311,15 +324,15 @@ class FastInfo:
             return self._reg_prev_close
         prices = self._get_1y_prices()
         if prices.shape[0] == 1:
-            # Tiny % of tickers don't return daily history before last trading day, 
+            # Tiny % of tickers don't return daily history before last trading day,
             # so backup option is hourly history:
             prices = self._get_1wk_1h_reg_prices()
             prices = prices[["Close"]].groupby(prices.index.date).last()
         if prices.shape[0] < 2:
-            # Very few symbols have regularMarketPreviousClose despite no 
+            # Very few symbols have regularMarketPreviousClose despite no
             # no trading data. E.g. 'QCSTIX'.
             # So fallback to original info[] if available.
-            self._tkr.info  # trigger fetch
+            _ = self._tkr.info  # trigger fetch
             k = "regularMarketPreviousClose"
             if self._tkr._quote._retired_info is not None and k in self._tkr._quote._retired_info:
                 self._reg_prev_close = self._tkr._quote._retired_info[k]
@@ -384,7 +397,7 @@ class FastInfo:
             self._50d_day_average = None
         else:
             n = prices.shape[0]
-            a = n-50
+            a = n - 50
             b = n
             if a < 0:
                 a = 0
@@ -402,7 +415,7 @@ class FastInfo:
             self._200d_day_average = None
         else:
             n = prices.shape[0]
-            a = n-200
+            a = n - 200
             b = n
             if a < 0:
                 a = 0
@@ -421,7 +434,7 @@ class FastInfo:
             self._10d_avg_vol = None
         else:
             n = prices.shape[0]
-            a = n-10
+            a = n - 10
             b = n
             if a < 0:
                 a = 0
@@ -494,7 +507,7 @@ class FastInfo:
             # Very few symbols have marketCap despite no share count.
             # E.g. 'BTC-USD'
             # So fallback to original info[] if available.
-            self._tkr.info
+            _ = self._tkr.info
             k = "marketCap"
             if self._tkr._quote._retired_info is not None and k in self._tkr._quote._retired_info:
                 self._mcap = self._tkr._quote._retired_info[k]
@@ -522,6 +535,8 @@ class TickerBase:
         self._earnings = None
         self._financials = None
 
+        self._query1_info = None
+
         # accept isin as ticker
         if utils.is_isin(self.ticker):
             self.ticker = utils.get_ticker_by_isin(self.ticker, None, session)
@@ -536,17 +551,30 @@ class TickerBase:
         self._fast_info = FastInfo(self)
 
     def stats(self, proxy=None):
-        ticker_url = "{}/{}".format(self._scrape_url, self.ticker)
+        # ticker_url = "{}/{}".format(self._scrape_url, self.ticker)
 
         # get info and sustainability
         data = self._data.get_json_data_stores(proxy=proxy)["QuoteSummaryStore"]
         return data
 
-    def history(self, period="1mo", interval="1d",
-                start=None, end=None, prepost=False, actions=True,
-                auto_adjust=True, back_adjust=False, repair=False, keepna=False,
-                proxy=None, rounding=False, timeout=10,
-                debug=True, raise_errors=False) -> pd.DataFrame:
+    def history(
+            self,
+            period="1mo",
+            interval="1d",
+            start=None,
+            end=None,
+            prepost=False,
+            actions=True,
+            auto_adjust=True,
+            back_adjust=False,
+            repair=False,
+            keepna=False,
+            proxy=None,
+            rounding=False,
+            timeout=10,
+            debug=True,
+            raise_errors=False,
+    ) -> pd.DataFrame:
         """
         :Parameters:
             period : str
@@ -604,9 +632,9 @@ class TickerBase:
                 shared._ERRORS[self.ticker] = err_msg
                 if debug:
                     if raise_errors:
-                        raise Exception('%s: %s' % (self.ticker, err_msg))
+                        raise Exception("%s: %s" % (self.ticker, err_msg))
                     else:
-                        print('- %s: %s' % (self.ticker, err_msg))
+                        print("- %s: %s" % (self.ticker, err_msg))
                 return utils.empty_df()
 
             if end is None:
@@ -639,7 +667,7 @@ class TickerBase:
                 proxy = proxy["https"]
             proxy = {"https": proxy}
 
-        #if the ticker is MUTUALFUND or ETF, then get capitalGains events
+        # if the ticker is MUTUALFUND or ETF, then get capitalGains events
         params["events"] = "div,splits,capitalGains"
 
         # Getting data from json
@@ -650,21 +678,19 @@ class TickerBase:
         try:
             get_fn = self._data.get
             if end is not None:
-                end_dt = _pd.Timestamp(end, unit='s').tz_localize("UTC")
-                dt_now = end_dt.tzinfo.localize(_datetime.datetime.utcnow())
+                end_dt = _pd.Timestamp(end, unit="s").tz_localize("UTC")
+                dt_now = _pd.Timestamp.utcnow()
                 data_delay = _datetime.timedelta(minutes=30)
-                if end_dt+data_delay <= dt_now:
+                if end_dt + data_delay <= dt_now:
                     # Date range in past so safe to fetch through cache:
                     get_fn = self._data.cache_get
-            data = get_fn(
-                url=url,
-                params=params,
-                timeout=timeout
-            )
+            data = get_fn(url=url, params=params, timeout=timeout, proxy=proxy)
             if "Will be right back" in data.text or data is None:
-                raise RuntimeError("*** YAHOO! FINANCE IS CURRENTLY DOWN! ***\n"
-                                   "Our engineers are working quickly to resolve "
-                                   "the issue. Thank you for your patience.")
+                raise RuntimeError(
+                    "*** YAHOO! FINANCE IS CURRENTLY DOWN! ***\n"
+                    "Our engineers are working quickly to resolve "
+                    "the issue. Thank you for your patience."
+                )
 
             data = data.json()
         except Exception:
@@ -681,7 +707,7 @@ class TickerBase:
         fail = False
         if data is None or not type(data) is dict:
             fail = True
-        elif type(data) is dict and 'status_code' in data:
+        elif type(data) is dict and "status_code" in data:
             err_msg += "(Yahoo status_code = {})".format(data["status_code"])
             fail = True
         elif "chart" in data and data["chart"]["error"]:
@@ -689,22 +715,24 @@ class TickerBase:
             fail = True
         elif "chart" not in data or data["chart"]["result"] is None or not data["chart"]["result"]:
             fail = True
-        elif period is not None and "timestamp" not in data["chart"]["result"][0] and period not in \
-                self._history_metadata["validRanges"]:
+        elif (
+                period is not None
+                and "timestamp" not in data["chart"]["result"][0]
+                and period not in self._history_metadata["validRanges"]
+        ):
             # User provided a bad period. The minimum should be '1d', but sometimes Yahoo accepts '1h'.
-            err_msg = "Period '{}' is invalid, must be one of {}".format(period, self._history_metadata[
-                "validRanges"])
+            err_msg = "Period '{}' is invalid, must be one of {}".format(period, self._history_metadata["validRanges"])
             fail = True
         if fail:
             shared._DFS[self.ticker] = utils.empty_df()
             shared._ERRORS[self.ticker] = err_msg
             if debug:
                 if raise_errors:
-                    raise Exception('%s: %s' % (self.ticker, err_msg))
+                    raise Exception("%s: %s" % (self.ticker, err_msg))
                 else:
-                    print('%s: %s' % (self.ticker, err_msg))
+                    print("%s: %s" % (self.ticker, err_msg))
             return utils.empty_df()
-        
+
         # parse quotes
         try:
             quotes = utils.parse_quotes(data["chart"]["result"][0])
@@ -718,41 +746,44 @@ class TickerBase:
             shared._ERRORS[self.ticker] = err_msg
             if debug:
                 if raise_errors:
-                    raise Exception('%s: %s' % (self.ticker, err_msg))
+                    raise Exception("%s: %s" % (self.ticker, err_msg))
                 else:
-                    print('%s: %s' % (self.ticker, err_msg))
+                    print("%s: %s" % (self.ticker, err_msg))
             return shared._DFS[self.ticker]
 
         # 2) fix weired bug with Yahoo! - returning 60m for 30m bars
         if interval.lower() == "30m":
-            quotes2 = quotes.resample('30T')
-            quotes = _pd.DataFrame(index=quotes2.last().index, data={
-                'Open': quotes2['Open'].first(),
-                'High': quotes2['High'].max(),
-                'Low': quotes2['Low'].min(),
-                'Close': quotes2['Close'].last(),
-                'Adj Close': quotes2['Adj Close'].last(),
-                'Volume': quotes2['Volume'].sum()
-            })
+            quotes2 = quotes.resample("30T")
+            quotes = _pd.DataFrame(
+                index=quotes2.last().index,
+                data={
+                    "Open": quotes2["Open"].first(),
+                    "High": quotes2["High"].max(),
+                    "Low": quotes2["Low"].min(),
+                    "Close": quotes2["Close"].last(),
+                    "Adj Close": quotes2["Adj Close"].last(),
+                    "Volume": quotes2["Volume"].sum(),
+                },
+            )
             try:
-                quotes['Dividends'] = quotes2['Dividends'].max()
+                quotes["Dividends"] = quotes2["Dividends"].max()
             except Exception:
                 pass
             try:
-                quotes['Stock Splits'] = quotes2['Dividends'].max()
+                quotes["Stock Splits"] = quotes2["Dividends"].max()
             except Exception:
                 pass
 
         # Select useful info from metadata
         quote_type = self._history_metadata["instrumentType"]
-        expect_capital_gains = quote_type in ('MUTUALFUND', 'ETF')
+        expect_capital_gains = quote_type in ("MUTUALFUND", "ETF")
         tz_exchange = self._history_metadata["exchangeTimezoneName"]
 
         # Note: ordering is important. If you change order, run the tests!
         quotes = utils.set_df_tz(quotes, params["interval"], tz_exchange)
         quotes = utils.fix_Yahoo_dst_issue(quotes, params["interval"])
         quotes = utils.fix_Yahoo_returning_live_separate(quotes, params["interval"], tz_exchange)
-        intraday = params["interval"][-1] in ("m", 'h')
+        intraday = params["interval"][-1] in ("m", "h")
         if not prepost and intraday and "tradingPeriods" in self._history_metadata:
             quotes = utils.fix_Yahoo_returning_prepost_unrequested(quotes, params["interval"], self._history_metadata)
 
@@ -764,19 +795,19 @@ class TickerBase:
         if start is not None:
             # Note: use pandas Timestamp as datetime.utcfromtimestamp has bugs on windows
             # https://github.com/python/cpython/issues/81708
-            startDt = _pd.Timestamp(start, unit='s')
+            startDt = _pd.Timestamp(start, unit="s")
             if dividends is not None:
-                dividends = dividends[dividends.index>=startDt]
+                dividends = dividends[dividends.index >= startDt]
             if capital_gains is not None:
-                capital_gains = capital_gains[capital_gains.index>=startDt]
+                capital_gains = capital_gains[capital_gains.index >= startDt]
             if splits is not None:
                 splits = splits[splits.index >= startDt]
         if end is not None:
-            endDt = _pd.Timestamp(end, unit='s')
+            endDt = _pd.Timestamp(end, unit="s")
             if dividends is not None:
-                dividends = dividends[dividends.index<endDt]
+                dividends = dividends[dividends.index < endDt]
             if capital_gains is not None:
-                capital_gains = capital_gains[capital_gains.index<endDt]
+                capital_gains = capital_gains[capital_gains.index < endDt]
             if splits is not None:
                 splits = splits[splits.index < endDt]
         if splits is not None:
@@ -787,15 +818,21 @@ class TickerBase:
             capital_gains = utils.set_df_tz(capital_gains, interval, tz_exchange)
 
         # Prepare for combine
-        intraday = params["interval"][-1] in ("m", 'h')
+        intraday = params["interval"][-1] in ("m", "h")
         if not intraday:
             # If localizing a midnight during DST transition hour when clocks roll back,
             # meaning clock hits midnight twice, then use the 2nd (ambiguous=True)
-            quotes.index = _pd.to_datetime(quotes.index.date).tz_localize(tz_exchange, ambiguous=True, nonexistent='shift_forward')
+            quotes.index = _pd.to_datetime(quotes.index.date).tz_localize(
+                tz_exchange, ambiguous=True, nonexistent="shift_forward"
+            )
             if dividends.shape[0] > 0:
-                dividends.index = _pd.to_datetime(dividends.index.date).tz_localize(tz_exchange, ambiguous=True, nonexistent='shift_forward')
+                dividends.index = _pd.to_datetime(dividends.index.date).tz_localize(
+                    tz_exchange, ambiguous=True, nonexistent="shift_forward"
+                )
             if splits.shape[0] > 0:
-                splits.index = _pd.to_datetime(splits.index.date).tz_localize(tz_exchange, ambiguous=True, nonexistent='shift_forward')
+                splits.index = _pd.to_datetime(splits.index.date).tz_localize(
+                    tz_exchange, ambiguous=True, nonexistent="shift_forward"
+                )
 
         # Combine
         df = quotes.sort_index()
@@ -815,14 +852,14 @@ class TickerBase:
             if capital_gains.shape[0] > 0:
                 df = utils.safe_merge_dfs(df, capital_gains, interval)
             if "Capital Gains" in df.columns:
-                df.loc[df["Capital Gains"].isna(),"Capital Gains"] = 0
+                df.loc[df["Capital Gains"].isna(), "Capital Gains"] = 0
             else:
                 df["Capital Gains"] = 0.0
 
-        if repair==True or repair=="silent":
+        if repair == True or repair == "silent":
             # Do this before auto/back adjust
-            df = self._fix_zeroes(df, interval, tz_exchange, prepost, silent=(repair=="silent"))
-            df = self._fix_unit_mixups(df, interval, tz_exchange, prepost, silent=(repair=="silent"))
+            df = self._fix_zeroes(df, interval, tz_exchange, prepost, silent=(repair == "silent"))
+            df = self._fix_unit_mixups(df, interval, tz_exchange, prepost, silent=(repair == "silent"))
 
         # Auto/back adjust
         try:
@@ -839,14 +876,13 @@ class TickerBase:
             shared._ERRORS[self.ticker] = err_msg
             if debug:
                 if raise_errors:
-                    raise Exception('%s: %s' % (self.ticker, err_msg))
+                    raise Exception("%s: %s" % (self.ticker, err_msg))
                 else:
-                    print('%s: %s' % (self.ticker, err_msg))
+                    print("%s: %s" % (self.ticker, err_msg))
 
         if rounding:
-            df = _np.round(df, data[
-                "chart"]["result"][0]["meta"]["priceHint"])
-        df['Volume'] = df['Volume'].fillna(0).astype(_np.int64)
+            df = _np.round(df, data["chart"]["result"][0]["meta"]["priceHint"])
+        df["Volume"] = df["Volume"].fillna(0).astype(_np.int64)
 
         if intraday:
             df.index.name = "Datetime"
@@ -854,10 +890,10 @@ class TickerBase:
             df.index.name = "Date"
 
         # duplicates and missing rows cleanup
-        df = df[~df.index.duplicated(keep='first')]
+        df = df[~df.index.duplicated(keep="first")]
         self._history = df.copy()
         if not actions:
-            df = df.drop(columns=["Dividends", "Stock Splits", "Capital Gains"], errors='ignore')
+            df = df.drop(columns=["Dividends", "Stock Splits", "Capital Gains"], errors="ignore")
         if not keepna:
             mask_nan_or_zero = (df.isna() | (df == 0)).all(axis=1)
             df = df.drop(mask_nan_or_zero.index[mask_nan_or_zero])
@@ -866,7 +902,7 @@ class TickerBase:
 
     # ------------------------
 
-    def _reconstruct_intervals_batch(self, df, interval, prepost, tag=-1, silent=False):
+    def _reconstruct_intervals_batch(self, df, interval, prepost, tag=-1.0, silent=False):
         if not isinstance(df, _pd.DataFrame):
             raise Exception("'df' must be a Pandas DataFrame not", type(df))
         if interval == "1m":
@@ -878,7 +914,7 @@ class TickerBase:
         debug = False
         # debug = True
 
-        if interval[1:] in ['d', 'wk', 'mo']:
+        if interval[1:] in ["d", "wk", "mo"]:
             # Interday data always includes pre & post
             prepost = True
             intraday = False
@@ -891,9 +927,9 @@ class TickerBase:
         # If interval is weekly then can construct with daily. But if smaller intervals then
         # restricted to recent times:
         intervals = ["1wk", "1d", "1h", "30m", "15m", "5m", "2m", "1m"]
-        itds = {i:utils._interval_to_timedelta(interval) for i in intervals}
-        nexts = {intervals[i]:intervals[i+1] for i in range(len(intervals)-1)}
-        min_lookbacks = {"1wk":None, "1d":None, "1h":_datetime.timedelta(days=730)}
+        itds = {i: utils._interval_to_timedelta(interval) for i in intervals}
+        nexts = {intervals[i]: intervals[i + 1] for i in range(len(intervals) - 1)}
+        min_lookbacks = {"1wk": None, "1d": None, "1h": _datetime.timedelta(days=730)}
         for i in ["30m", "15m", "5m", "2m"]:
             min_lookbacks[i] = _datetime.timedelta(days=60)
         min_lookbacks["1m"] = _datetime.timedelta(days=30)
@@ -903,11 +939,10 @@ class TickerBase:
         else:
             print("WARNING: Have not implemented repair for '{}' interval. Contact developers".format(interval))
             raise Exception("why here")
-            return df
 
         df = df.sort_index()
 
-        f_repair = df[data_cols].to_numpy()==tag
+        f_repair = df[data_cols].to_numpy() == tag
         f_repair_rows = f_repair.any(axis=1)
 
         # Ignore old intervals for which Yahoo won't return finer data:
@@ -938,7 +973,7 @@ class TickerBase:
 
         df_v2 = df.copy()
         f_good = ~(df[price_cols].isna().any(axis=1))
-        f_good = f_good & (df[price_cols].to_numpy()!=tag).all(axis=1)
+        f_good = f_good & (df[price_cols].to_numpy() != tag).all(axis=1)
         df_good = df[f_good]
 
         # Group nearby NaN-intervals together to reduce number of Yahoo fetches
@@ -948,28 +983,25 @@ class TickerBase:
         td = utils._interval_to_timedelta(interval)
         # Note on setting max size: have to allow space for adding good data
         if sub_interval == "1mo":
-            grp_max_size = _dateutil.relativedelta.relativedelta(years=2)
+            grp_max_size = _relativedelta.relativedelta(years=2)
         elif sub_interval == "1wk":
-            grp_max_size = _dateutil.relativedelta.relativedelta(years=2)
+            grp_max_size = _relativedelta.relativedelta(years=2)
         elif sub_interval == "1d":
-            grp_max_size = _dateutil.relativedelta.relativedelta(years=2)
+            grp_max_size = _relativedelta.relativedelta(years=2)
         elif sub_interval == "1h":
-            grp_max_size = _dateutil.relativedelta.relativedelta(years=1)
+            grp_max_size = _relativedelta.relativedelta(years=1)
         elif sub_interval == "1m":
-            grp_max_size = _datetime.timedelta(days=5)  # allow 2 days for buffer below
+            grp_max_size = _relativedelta.relativedelta(days=5)  # allow 2 days for buffer below
         else:
             grp_max_size = _datetime.timedelta(days=30)
         if debug:
             print("- grp_max_size =", grp_max_size)
         for i in range(1, len(dts_to_repair)):
-            ind = indices_to_repair[i]
             dt = dts_to_repair[i]
-            if dt.date() < dts_groups[-1][0].date()+grp_max_size:
+            if dt.date() < dts_groups[-1][0].date() + grp_max_size:
                 dts_groups[-1].append(dt)
             else:
                 dts_groups.append([dt])
-            last_dt = dt
-            last_ind = ind
 
         if debug:
             print("Repair groups:")
@@ -982,15 +1014,16 @@ class TickerBase:
             g0 = g[0]
             i0 = df_good.index.get_indexer([g0], method="nearest")[0]
             if i0 > 0:
-                if (min_dt is None or df_good.index[i0-1] >= min_dt) and \
-                    ((not intraday) or df_good.index[i0-1].date()==g0.date()):
+                if (min_dt is None or df_good.index[i0 - 1] >= min_dt) and (
+                        (not intraday) or df_good.index[i0 - 1].date() == g0.date()
+                ):
                     i0 -= 1
             gl = g[-1]
             il = df_good.index.get_indexer([gl], method="nearest")[0]
-            if il < len(df_good)-1:
-                if (not intraday) or df_good.index[il+1].date()==gl.date():
+            if il < len(df_good) - 1:
+                if (not intraday) or df_good.index[il + 1].date() == gl.date():
                     il += 1
-            good_dts = df_good.index[i0:il+1]
+            good_dts = df_good.index[i0: il + 1]
             dts_groups[i] += good_dts.to_list()
             dts_groups[i].sort()
 
@@ -1030,23 +1063,32 @@ class TickerBase:
             fetch_end += td_1d
             if intraday:
                 fetch_start = fetch_start.date()
-                fetch_end = fetch_end.date()+td_1d
+                fetch_end = fetch_end.date() + td_1d
             if debug:
                 print(f"- fetching {sub_interval} prepost={prepost} {fetch_start}->{fetch_end}")
             r = "silent" if silent else True
-            df_fine = self.history(start=fetch_start, end=fetch_end, interval=sub_interval, auto_adjust=False, actions=False, prepost=prepost, repair=r, keepna=True)
+            df_fine = self.history(
+                start=fetch_start,
+                end=fetch_end,
+                interval=sub_interval,
+                auto_adjust=False,
+                actions=False,
+                prepost=prepost,
+                repair=r,
+                keepna=True,
+            )
             if df_fine is None or df_fine.empty:
                 if not silent:
                     print("YF: WARNING: Cannot reconstruct because Yahoo not returning data in interval")
                 continue
             # Discard the buffer
-            df_fine = df_fine.loc[g[0] : g[-1]+itds[sub_interval]-_datetime.timedelta(milliseconds=1)]
+            df_fine = df_fine.loc[g[0]: g[-1] + itds[sub_interval] - _datetime.timedelta(milliseconds=1)]
 
             df_fine["ctr"] = 0
             if interval == "1wk":
                 weekdays = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
-                week_end_day = weekdays[(df_block.index[0].weekday()+7-1)%7]
-                df_fine["Week Start"] = df_fine.index.tz_localize(None).to_period("W-"+week_end_day).start_time
+                week_end_day = weekdays[(df_block.index[0].weekday() + 7 - 1) % 7]
+                df_fine["Week Start"] = df_fine.index.tz_localize(None).to_period("W-" + week_end_day).start_time
                 grp_col = "Week Start"
             elif interval == "1d":
                 df_fine["Day Start"] = pd.to_datetime(df_fine.index.date)
@@ -1065,12 +1107,13 @@ class TickerBase:
                 AdjClose=("Adj Close", "last"),
                 Low=("Low", "min"),
                 High=("High", "max"),
-                Volume=("Volume", "sum")).rename(columns={"AdjClose":"Adj Close"})
+                Volume=("Volume", "sum"),
+            ).rename(columns={"AdjClose": "Adj Close"})
             if grp_col in ["Week Start", "Day Start"]:
                 df_new.index = df_new.index.tz_localize(df_fine.index.tz)
             else:
                 df_fine["diff"] = df_fine["intervalID"].diff()
-                new_index = _np.append([df_fine.index[0]], df_fine.index[df_fine["intervalID"].diff()>0])
+                new_index = _np.append([df_fine.index[0]], df_fine.index[df_fine["intervalID"].diff() > 0])
                 df_new.index = new_index
 
             if debug:
@@ -1087,7 +1130,7 @@ class TickerBase:
                 continue
             df_new_calib = df_new[df_new.index.isin(common_index)][price_cols].to_numpy()
             df_block_calib = df_block[df_block.index.isin(common_index)][price_cols].to_numpy()
-            calib_filter = (df_block_calib != tag)
+            calib_filter = df_block_calib != tag
             if not calib_filter.any():
                 # Can't calibrate so don't attempt repair
                 if debug:
@@ -1095,15 +1138,15 @@ class TickerBase:
                 continue
             # Avoid divide-by-zero warnings:
             for j in range(len(price_cols)):
-                f = ~calib_filter[:,j]
+                f = ~calib_filter[:, j]
                 if f.any():
-                    df_block_calib[f,j] = 1
-                    df_new_calib[f,j] = 1
+                    df_block_calib[f, j] = 1
+                    df_new_calib[f, j] = 1
             ratios = df_block_calib[calib_filter] / df_new_calib[calib_filter]
             weights = df_fine_grp.size()
             weights.index = df_new.index
             weights = weights[weights.index.isin(common_index)].to_numpy().astype(float)
-            weights = weights[:,None]  # transpose
+            weights = weights[:, None]  # transpose
             weights = _np.tile(weights, len(price_cols))  # 1D -> 2D
             weights = weights[calib_filter]  # flatten
             ratio = _np.average(ratios, weights=weights)
@@ -1127,31 +1170,30 @@ class TickerBase:
                     df_new["Volume"] *= ratio_rcp
 
             # Repair!
-            bad_dts = df_block.index[(df_block[price_cols+["Volume"]]==tag).any(axis=1)]
+            bad_dts = df_block.index[(df_block[price_cols + ["Volume"]] == tag).any(axis=1)]
 
             if debug:
                 no_fine_data_dts = []
                 for idx in bad_dts:
-                    if not idx in df_new.index:
-                        # Yahoo didn't return finer-grain data for this interval, 
+                    if idx not in df_new.index:
+                        # Yahoo didn't return finer-grain data for this interval,
                         # so probably no trading happened.
                         no_fine_data_dts.append(idx)
                 if len(no_fine_data_dts) > 0:
                     print(f"Yahoo didn't return finer-grain data for these intervals:")
                     print(no_fine_data_dts)
             for idx in bad_dts:
-                if not idx in df_new.index:
-                    # Yahoo didn't return finer-grain data for this interval, 
+                if idx not in df_new.index:
+                    # Yahoo didn't return finer-grain data for this interval,
                     # so probably no trading happened.
                     continue
                 df_new_row = df_new.loc[idx]
 
                 if interval == "1wk":
-                    df_last_week = df_new.iloc[df_new.index.get_loc(idx)-1]
                     df_fine = df_fine.loc[idx:]
 
                 df_bad_row = df.loc[idx]
-                bad_fields = df_bad_row.index[df_bad_row==tag].values
+                bad_fields = df_bad_row.index[df_bad_row == tag].values
                 if "High" in bad_fields:
                     df_v2.loc[idx, "High"] = df_new_row["High"]
                 if "Low" in bad_fields:
@@ -1159,6 +1201,7 @@ class TickerBase:
                 if "Open" in bad_fields:
                     if interval == "1wk" and idx != df_fine.index[0]:
                         # Exchange closed Monday. In this case, Yahoo sets Open to last week close
+                        df_last_week = df_new.iloc[df_new.index.get_loc(idx) - 1]
                         df_v2.loc[idx, "Open"] = df_last_week["Close"]
                         df_v2.loc[idx, "Low"] = min(df_v2.loc[idx, "Open"], df_v2.loc[idx, "Low"])
                     else:
@@ -1172,7 +1215,8 @@ class TickerBase:
                 n_fixed += 1
 
         if debug:
-            print("df_v2:") ; print(df_v2)
+            print("df_v2:")
+            print(df_v2)
 
         return df_v2
 
@@ -1200,7 +1244,7 @@ class TickerBase:
 
         data_cols = ["High", "Open", "Low", "Close", "Adj Close"]  # Order important, separate High from Low
         data_cols = [c for c in data_cols if c in df2.columns]
-        f_zeroes = (df2[data_cols]==0).any(axis=1)
+        f_zeroes = (df2[data_cols] == 0).any(axis=1)
         if f_zeroes.any():
             df2_zeroes = df2[f_zeroes]
             df2 = df2[~f_zeroes]
@@ -1218,20 +1262,20 @@ class TickerBase:
         # Mark values to send for repair
         tag = -1.0
         for i in range(len(data_cols)):
-            fi = f[:,i]
+            fi = f[:, i]
             c = data_cols[i]
             df2.loc[fi, c] = tag
 
-        n_before = (df2[data_cols].to_numpy()==tag).sum()
+        n_before = (df2[data_cols].to_numpy() == tag).sum()
         df2 = self._reconstruct_intervals_batch(df2, interval, prepost, tag, silent)
-        n_after = (df2[data_cols].to_numpy()==tag).sum()
+        n_after = (df2[data_cols].to_numpy() == tag).sum()
 
         if n_after > 0:
             # This second pass will *crudely* "fix" any remaining errors in High/Low
             # simply by ensuring they don't contradict e.g. Low = 100x High.
-            f = df2[data_cols].to_numpy()==tag
+            f = df2[data_cols].to_numpy() == tag
             for i in range(f.shape[0]):
-                fi = f[i,:]
+                fi = f[i, :]
                 if not fi.any():
                     continue
                 idx = df2.index[i]
@@ -1261,7 +1305,7 @@ class TickerBase:
                 if fi[j]:
                     df2.loc[idx, c] = df2.loc[idx, ["Open", "Close"]].min()
 
-        n_after_crude = (df2[data_cols].to_numpy()==tag).sum()
+        n_after_crude = (df2[data_cols].to_numpy() == tag).sum()
 
         n_fixed = n_before - n_after_crude
         n_fixed_crudely = n_after - n_after_crude
@@ -1273,15 +1317,15 @@ class TickerBase:
             print(report_msg)
 
         # Restore original values where repair failed
-        f = df2[data_cols].values==tag
+        f = df2[data_cols].values == tag
         for j in range(len(data_cols)):
-            fj = f[:,j]
+            fj = f[:, j]
             if fj.any():
                 c = data_cols[j]
                 df2.loc[fj, c] = df.loc[fj, c]
         if df2_zeroes is not None:
             df2 = _pd.concat([df2, df2_zeroes]).sort_index()
-            df2.index = _pd.to_datetime()
+            df2.index = _pd.to_datetime(df2.index)
 
         return df2
 
@@ -1296,7 +1340,7 @@ class TickerBase:
         debug = False
         # debug = True
 
-        intraday = interval[-1] in ("m", 'h')
+        intraday = interval[-1] in ("m", "h")
 
         df = df.sort_index()  # important!
         df2 = df.copy()
@@ -1315,14 +1359,14 @@ class TickerBase:
             df_nans["_date"] = df_nans.index.date
             grp = df_nans.groupby("_date")
             nan_pct = grp.sum() / grp.count()
-            dts = nan_pct.index[nan_pct["nan"]>0.5]
+            dts = nan_pct.index[nan_pct["nan"] > 0.5]
             f_zero_or_nan_ignore = _np.isin(f_prices_bad.index.date, dts)
             df2_reserve = df2[f_zero_or_nan_ignore]
             df2 = df2[~f_zero_or_nan_ignore]
             f_prices_bad = (df2[price_cols] == 0.0) | df2[price_cols].isna()
 
         f_high_low_good = (~df2["High"].isna()) & (~df2["Low"].isna())
-        f_vol_bad = (df2["Volume"]==0).to_numpy() & f_high_low_good & (df2["High"]!=df2["Low"]).to_numpy()
+        f_vol_bad = (df2["Volume"] == 0).to_numpy() & f_high_low_good & (df2["High"] != df2["Low"]).to_numpy()
 
         # Check whether worth attempting repair
         f_prices_bad = f_prices_bad.to_numpy()
@@ -1331,7 +1375,7 @@ class TickerBase:
             if debug:
                 print("no bad data to repair")
             return df
-        if f_prices_bad.sum() == len(price_cols)*len(df2):
+        if f_prices_bad.sum() == len(price_cols) * len(df2):
             # Need some good data to calibrate
             if debug:
                 print("no good data to calibrate")
@@ -1343,20 +1387,20 @@ class TickerBase:
         tag = -1.0
         for i in range(len(price_cols)):
             c = price_cols[i]
-            df2.loc[f_prices_bad[:,i], c] = tag
+            df2.loc[f_prices_bad[:, i], c] = tag
         df2.loc[f_vol_bad, "Volume"] = tag
         # If volume=0 or NaN for bad prices, then tag volume for repair
-        f_vol_zero_or_nan = (df2["Volume"].to_numpy()==0) | (df2["Volume"].isna().to_numpy())
+        f_vol_zero_or_nan = (df2["Volume"].to_numpy() == 0) | (df2["Volume"].isna().to_numpy())
         df2.loc[f_prices_bad.any(axis=1) & f_vol_zero_or_nan, "Volume"] = tag
         # If volume=0 or NaN but price moved in interval, then tag volume for repair
         f_change = df2["High"].to_numpy() != df2["Low"].to_numpy()
         df2.loc[f_change & f_vol_zero_or_nan, "Volume"] = tag
 
-        n_before = (df2[data_cols].to_numpy()==tag).sum()
-        dts_tagged = df2.index[(df2[data_cols].to_numpy()==tag).any(axis=1)]
+        n_before = (df2[data_cols].to_numpy() == tag).sum()
+        dts_tagged = df2.index[(df2[data_cols].to_numpy() == tag).any(axis=1)]
         df2 = self._reconstruct_intervals_batch(df2, interval, prepost, tag, silent)
-        n_after = (df2[data_cols].to_numpy()==tag).sum()
-        dts_not_repaired = df2.index[(df2[data_cols].to_numpy()==tag).any(axis=1)]
+        n_after = (df2[data_cols].to_numpy() == tag).sum()
+        dts_not_repaired = df2.index[(df2[data_cols].to_numpy() == tag).any(axis=1)]
         n_fixed = n_before - n_after
         if not silent and n_fixed > 0:
             msg = f"{self.ticker}: fixed {n_fixed}/{n_before} value=0 errors in {interval} price data"
@@ -1370,9 +1414,9 @@ class TickerBase:
         df2 = df2.sort_index()
 
         # Restore original values where repair failed (i.e. remove tag values)
-        f = df2[data_cols].values==tag
+        f = df2[data_cols].values == tag
         for j in range(len(data_cols)):
-            fj = f[:,j]
+            fj = f[:, j]
             if fj.any():
                 c = data_cols[j]
                 df2.loc[fj, c] = df.loc[fj, c]
@@ -1418,7 +1462,7 @@ class TickerBase:
                 print("Failed to get ticker '{}' reason: {}".format(self.ticker, e))
             return None
         else:
-            error = data.get('chart', {}).get('error', None)
+            error = data.get("chart", {}).get("error", None)
             if error:
                 # explicit error from yahoo API
                 if debug_mode:
@@ -1474,7 +1518,10 @@ class TickerBase:
 
     def get_info(self, proxy=None) -> dict:
         self._quote.proxy = proxy
-        data = self._quote.info
+        try:
+            data = self._quote.info
+        except Exception:
+            data = self.get_query1_info()
         return data
 
     @property
@@ -1552,8 +1599,9 @@ class TickerBase:
         data = self._fundamentals.earnings[freq]
         if as_dict:
             dict_data = data.to_dict()
-            dict_data['financialCurrency'] = 'USD' if 'financialCurrency' not in self._earnings else self._earnings[
-                'financialCurrency']
+            dict_data["financialCurrency"] = (
+                "USD" if "financialCurrency" not in self._earnings else self._earnings["financialCurrency"]
+            )
             return dict_data
         return data
 
@@ -1582,10 +1630,10 @@ class TickerBase:
             data = self._fundamentals.financials.get_income_scrape(freq=freq, proxy=proxy)
         else:
             data = self._fundamentals.financials.get_income_time_series(freq=freq, proxy=proxy)
-            
+
         if pretty:
             data = data.copy()
-            data.index = utils.camel2title(data.index, sep=' ', acronyms=["EBIT", "EBITDA", "EPS", "NI"])
+            data.index = utils.camel2title(data.index, sep=" ", acronyms=["EBIT", "EBITDA", "EPS", "NI"])
         if as_dict:
             return data.to_dict()
         return data
@@ -1624,7 +1672,7 @@ class TickerBase:
 
         if pretty:
             data = data.copy()
-            data.index = utils.camel2title(data.index, sep=' ', acronyms=["PPE"])
+            data.index = utils.camel2title(data.index, sep=" ", acronyms=["PPE"])
         if as_dict:
             return data.to_dict()
         return data
@@ -1660,7 +1708,7 @@ class TickerBase:
 
         if pretty:
             data = data.copy()
-            data.index = utils.camel2title(data.index, sep=' ', acronyms=["PPE"])
+            data.index = utils.camel2title(data.index, sep=" ", acronyms=["PPE"])
         if as_dict:
             return data.to_dict()
         return data
@@ -1700,7 +1748,7 @@ class TickerBase:
             if "Capital Gains" in self._history:
                 action_columns.append("Capital Gains")
             actions = self._history[action_columns]
-            return actions[actions != 0].dropna(how='all').fillna(0)
+            return actions[actions != 0].dropna(how="all").fillna(0)
         return []
 
     def get_shares(self, proxy=None, as_dict=False):
@@ -1712,16 +1760,16 @@ class TickerBase:
 
     def get_shares_full(self, start=None, end=None, proxy=None):
         # Process dates
-        tz = self._get_ticker_tz(debug_mode=False, proxy=None, timeout=10)
+        tz = self._get_ticker_tz(debug_mode=False, proxy=proxy, timeout=10)
         dt_now = _pd.Timestamp.utcnow().tz_convert(tz)
         if start is not None:
             start_ts = utils._parse_user_dt(start, tz)
             start = _pd.Timestamp.fromtimestamp(start_ts).tz_localize("UTC").tz_convert(tz)
-            start_d = start.date()
+            # start_d = start.date()
         if end is not None:
             end_ts = utils._parse_user_dt(end, tz)
             end = _pd.Timestamp.fromtimestamp(end_ts).tz_localize("UTC").tz_convert(tz)
-            end_d = end.date()
+            # end_d = end.date()
         if end is None:
             end = dt_now
         if start is None:
@@ -1731,31 +1779,35 @@ class TickerBase:
             return None
         start = start.floor("D")
         end = end.ceil("D")
-        
+
         # Fetch
-        ts_url_base = "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{0}?symbol={0}".format(self.ticker)
+        ts_url_base = (
+            "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{0}?symbol={0}".format(
+                self.ticker
+            )
+        )
         shares_url = ts_url_base + "&period1={}&period2={}".format(int(start.timestamp()), int(end.timestamp()))
         try:
             json_str = self._data.cache_get(shares_url).text
             json_data = _json.loads(json_str)
-        except:
+        except Exception:
             print(f"{self.ticker}: Yahoo web request for share count failed")
             return None
         try:
             fail = json_data["finance"]["error"]["code"] == "Bad Request"
-        except:
+        except Exception:
             fail = False
         if fail:
             print(f"{self.ticker}: Yahoo web request for share count failed")
             return None
 
         shares_data = json_data["timeseries"]["result"]
-        if not "shares_out" in shares_data[0]:
+        if "shares_out" not in shares_data[0]:
             return None
         try:
             df = _pd.Series(shares_data[0]["shares_out"], index=_pd.to_datetime(shares_data[0]["timestamp"], unit="s"))
         except Exception as e:
-            print(f"{self.ticker}: Failed to parse shares count data: "+str(e))
+            print(f"{self.ticker}: Failed to parse shares count data: " + str(e))
             return None
 
         df.index = df.index.tz_localize(tz)
@@ -1770,7 +1822,7 @@ class TickerBase:
         ticker = self.ticker.upper()
 
         if "-" in ticker or "^" in ticker:
-            self._isin = '-'
+            self._isin = "-"
             return self._isin
 
         q = ticker
@@ -1780,11 +1832,12 @@ class TickerBase:
             # Don't print error message cause self._quote.info will print one
             return None
         if "shortName" in self._quote.info:
-            q = self._quote.info['shortName']
+            q = self._quote.info["shortName"]
 
-        url = 'https://markets.businessinsider.com/ajax/' \
-              'SearchController_Suggest?max_results=25&query=%s' \
-              % urlencode(q)
+        url = (
+                "https://markets.businessinsider.com/ajax/"
+                "SearchController_Suggest?max_results=25&query=%s" % urlencode(q)
+        )
         data = self._data.cache_get(url=url, proxy=proxy).text
 
         search_str = '"{}|'.format(ticker)
@@ -1792,13 +1845,13 @@ class TickerBase:
             if q.lower() in data.lower():
                 search_str = '"|'
                 if search_str not in data:
-                    self._isin = '-'
+                    self._isin = "-"
                     return self._isin
             else:
-                self._isin = '-'
+                self._isin = "-"
                 return self._isin
 
-        self._isin = data.split(search_str)[1].split('"')[0].split('|')[0]
+        self._isin = data.split(search_str)[1].split('"')[0].split("|")[0]
         return self._isin
 
     def get_news(self, proxy=None):
@@ -1809,9 +1862,11 @@ class TickerBase:
         url = "{}/v1/finance/search?q={}".format(self._base_url, self.ticker)
         data = self._data.cache_get(url=url, proxy=proxy)
         if "Will be right back" in data.text:
-            raise RuntimeError("*** YAHOO! FINANCE IS CURRENTLY DOWN! ***\n"
-                               "Our engineers are working quickly to resolve "
-                               "the issue. Thank you for your patience.")
+            raise RuntimeError(
+                "*** YAHOO! FINANCE IS CURRENTLY DOWN! ***\n"
+                "Our engineers are working quickly to resolve "
+                "the issue. Thank you for your patience."
+            )
         data = data.json()
 
         # parse news
@@ -1836,14 +1891,17 @@ class TickerBase:
         dates = None
         while True:
             url = "{}/calendar/earnings?symbol={}&offset={}&size={}".format(
-                _ROOT_URL_, self.ticker, page_offset, page_size)
+                _ROOT_URL_, self.ticker, page_offset, page_size
+            )
 
             data = self._data.cache_get(url=url, proxy=proxy).text
 
             if "Will be right back" in data:
-                raise RuntimeError("*** YAHOO! FINANCE IS CURRENTLY DOWN! ***\n"
-                                   "Our engineers are working quickly to resolve "
-                                   "the issue. Thank you for your patience.")
+                raise RuntimeError(
+                    "*** YAHOO! FINANCE IS CURRENTLY DOWN! ***\n"
+                    "Our engineers are working quickly to resolve "
+                    "the issue. Thank you for your patience."
+                )
 
             try:
                 data = _pd.read_html(data)[0]
@@ -1870,7 +1928,7 @@ class TickerBase:
 
         if dates is None or dates.shape[0] == 0:
             err_msg = "No earnings dates found, symbol may be delisted"
-            print('- %s: %s' % (self.ticker, err_msg))
+            print("- %s: %s" % (self.ticker, err_msg))
             return None
         dates = dates.reset_index(drop=True)
 
@@ -1879,7 +1937,7 @@ class TickerBase:
 
         # Convert types
         for cn in ["EPS Estimate", "Reported EPS", "Surprise(%)"]:
-            dates.loc[dates[cn] == '-', cn] = "NaN"
+            dates.loc[dates[cn] == "-", cn] = "NaN"
             dates[cn] = dates[cn].astype(float)
 
         # Convert % to range 0->1:
@@ -1888,13 +1946,13 @@ class TickerBase:
         # Parse earnings date string
         cn = "Earnings Date"
         # - remove AM/PM and timezone from date string
-        tzinfo = dates[cn].str.extract('([AP]M[a-zA-Z]*)$')
-        dates[cn] = dates[cn].replace(' [AP]M[a-zA-Z]*$', '', regex=True)
+        tzinfo = dates[cn].str.extract("([AP]M[a-zA-Z]*)$")
+        dates[cn] = dates[cn].replace(" [AP]M[a-zA-Z]*$", "", regex=True)
         # - split AM/PM from timezone
-        tzinfo = tzinfo[0].str.extract('([AP]M)([a-zA-Z]*)', expand=True)
+        tzinfo = tzinfo[0].str.extract("([AP]M)([a-zA-Z]*)", expand=True)
         tzinfo.columns = ["AM/PM", "TZ"]
         # - combine and parse
-        dates[cn] = dates[cn] + ' ' + tzinfo["AM/PM"]
+        dates[cn] = dates[cn] + " " + tzinfo["AM/PM"]
         dates[cn] = _pd.to_datetime(dates[cn], format="%b %d, %Y, %I %p")
         # - instead of attempting decoding of ambiguous timezone abbreviation, just use 'info':
         self._quote.proxy = proxy
@@ -1912,3 +1970,25 @@ class TickerBase:
             # Request intraday data, because then Yahoo returns exchange schedule.
             self.history(period="1wk", interval="1h", prepost=True)
         return self._history_metadata
+
+    def get_query1_info(self) -> dict:
+        if self._query1_info is None:
+            result = self._data.get_raw_json(
+                _BASIC_URL_, params={"formatted": "true", "lang": "en-US", "symbols": self.ticker}
+            )
+            query1_info = next(
+                (info for info in result.get("quoteResponse", {}).get("result", []) if info["symbol"] == self.ticker),
+                None,
+            )
+            for k, v in query1_info.items():
+                if isinstance(v, dict) and "raw" in v and "fmt" in v:
+                    query1_info[k] = v["fmt"] if k in {"regularMarketTime", "postMarketTime"} else v["raw"]
+                elif isinstance(v, str):
+                    query1_info[k] = v.replace("\xa0", " ")
+            if "firstTradeDateMilliseconds" in query1_info:
+                query1_info["firstTradeDateMilliseconds"] = pd.Timestamp(
+                    query1_info["firstTradeDateMilliseconds"], unit="ms", tz="UTC"
+                ).tz_convert(query1_info.get("exchangeTimezoneName", "UTC"))
+            self._query1_info = query1_info
+
+        return self._query1_info

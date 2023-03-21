@@ -1,8 +1,8 @@
 import functools
-from functools import lru_cache
-
 import hashlib
 from base64 import b64decode
+from functools import lru_cache
+
 usePycryptodome = False  # slightly faster
 # usePycryptodome = True
 if usePycryptodome:
@@ -12,10 +12,10 @@ else:
     from cryptography.hazmat.primitives import padding
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-import requests as requests
 import re
-from bs4 import BeautifulSoup
 
+import requests as requests
+from bs4 import BeautifulSoup
 from frozendict import frozendict
 
 try:
@@ -64,7 +64,7 @@ def _extract_extra_keys_from_stores(data):
 
 
 def decrypt_cryptojs_aes_stores(data, keys=None):
-    encrypted_stores = data['context']['dispatcher']['stores']
+    encrypted_stores = data["context"]["dispatcher"]["stores"]
 
     password = None
     if keys is not None:
@@ -165,15 +165,17 @@ def decrypt_cryptojs_aes_stores(data, keys=None):
     return decoded_stores
 
 
-_SCRAPE_URL_ = 'https://finance.yahoo.com/quote'
+_SCRAPE_URL_ = "https://finance.yahoo.com/quote"
 
 
 class TickerData:
     """
     Have one place to retrieve data from Yahoo API in order to ease caching and speed up operations
     """
+
     user_agent_headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36"
+    }
 
     def __init__(self, ticker: str, session=None):
         self.ticker = ticker
@@ -186,8 +188,14 @@ class TickerData:
             params=params,
             proxies=proxy,
             timeout=timeout,
-            headers=user_agent_headers or self.user_agent_headers)
+            headers=user_agent_headers or self.user_agent_headers,
+        )
         return response
+
+    def get_raw_json(self, url, user_agent_headers=None, params=None, proxy=None, timeout=30):
+        response = self.get(url, user_agent_headers=user_agent_headers, params=params, proxy=proxy, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
 
     @lru_cache_freezeargs
     @lru_cache(maxsize=cache_maxsize)
@@ -212,8 +220,8 @@ class TickerData:
         key_list = list(re_data.keys())
         if re_data.get("plugins"):  # 1) attempt to get last 4 keys after plugins
             ind = key_list.index("plugins")
-            if len(key_list) > ind+1:
-                sub_keys = key_list[ind+1:]
+            if len(key_list) > ind + 1:
+                sub_keys = key_list[ind + 1 :]
                 if len(sub_keys) == key_count:
                     re_obj = {}
                     missing_val = False
@@ -226,11 +234,11 @@ class TickerData:
                         result = re_obj
 
         if not result is None:
-            return [''.join(result.values())]
+            return ["".join(result.values())]
 
-        re_keys = []    # 2) attempt scan main.js file approach to get keys
+        re_keys = []  # 2) attempt scan main.js file approach to get keys
         prefix = "https://s.yimg.com/uc/finance/dd-site/js/main."
-        tags = [tag['src'] for tag in soup.find_all('script') if prefix in tag.get('src', '')]
+        tags = [tag["src"] for tag in soup.find_all("script") if prefix in tag.get("src", "")]
         for t in tags:
             response_js = self.cache_get(t)
             #
@@ -240,12 +248,13 @@ class TickerData:
             else:
                 r_data = response_js.content.decode("utf8")
                 re_list = [
-                    x.group() for x in re.finditer(r"context.dispatcher.stores=JSON.parse((?:.*?\r?\n?)*)toString", r_data)
+                    x.group()
+                    for x in re.finditer(r"context.dispatcher.stores=JSON.parse((?:.*?\r?\n?)*)toString", r_data)
                 ]
                 for rl in re_list:
                     re_sublist = [x.group() for x in re.finditer(r"t\[\"((?:.*?\r?\n?)*)\"\]", rl)]
                     if len(re_sublist) == key_count:
-                        re_keys = [sl.replace('t["', '').replace('"]', '') for sl in re_sublist]
+                        re_keys = [sl.replace('t["', "").replace('"]', "") for sl in re_sublist]
                         break
                 response_js.close()
             if len(re_keys) == key_count:
@@ -259,16 +268,16 @@ class TickerData:
                     break
                 re_obj.update({k: re_data.get(k)})
             if not missing_val:
-                return [''.join(re_obj.values())]
+                return ["".join(re_obj.values())]
 
         return []
 
     @lru_cache_freezeargs
     @lru_cache(maxsize=cache_maxsize)
     def get_json_data_stores(self, sub_page: str = None, proxy=None) -> dict:
-        '''
+        """
         get_json_data_stores returns a python dictionary of the data stores in yahoo finance web page.
-        '''
+        """
         if sub_page:
             ticker_url = "{}/{}/{}".format(_SCRAPE_URL_, self.ticker, sub_page)
         else:
@@ -279,8 +288,7 @@ class TickerData:
 
         # The actual json-data for stores is in a javascript assignment in the webpage
         try:
-            json_str = html.split('root.App.main =')[1].split(
-                '(this)')[0].split(';\n}')[0].strip()
+            json_str = html.split("root.App.main =")[1].split("(this)")[0].split(";\n}")[0].strip()
         except IndexError:
             # Fetch failed, probably because Yahoo spam triggered
             return {}
@@ -299,7 +307,7 @@ class TickerData:
             keys = []
             try:
                 extra_keys = _extract_extra_keys_from_stores(data)
-                keys = [''.join(extra_keys[-4:])]
+                keys = ["".join(extra_keys[-4:])]
             except:
                 pass
             #
@@ -312,13 +320,12 @@ class TickerData:
         if stores is None:
             # Maybe Yahoo returned old format, not encrypted
             if "context" in data and "dispatcher" in data["context"]:
-                stores = data['context']['dispatcher']['stores']
+                stores = data["context"]["dispatcher"]["stores"]
         if stores is None:
             raise Exception(f"{self.ticker}: Failed to extract data stores from web request")
 
         # return data
-        new_data = json.dumps(stores).replace('{}', 'null')
-        new_data = re.sub(
-            r'{[\'|\"]raw[\'|\"]:(.*?),(.*?)}', r'\1', new_data)
+        new_data = json.dumps(stores).replace("{}", "null")
+        new_data = re.sub(r"{[\'|\"]raw[\'|\"]:(.*?),(.*?)}", r"\1", new_data)
 
         return json.loads(new_data)
