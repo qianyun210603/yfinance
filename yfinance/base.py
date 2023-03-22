@@ -30,7 +30,6 @@ from urllib.parse import quote as urlencode
 import dateutil.relativedelta as _relativedelta
 import numpy as _np
 import pandas as _pd
-import pandas as pd
 
 from . import shared, utils
 from .data import TickerData
@@ -159,8 +158,8 @@ class FastInfo:
             self._md = self._tkr.get_history_metadata()
             try:
                 ctp = self._md["currentTradingPeriod"]
-                self._today_open = pd.to_datetime(ctp["regular"]["start"], unit="s", utc=True).tz_convert(self.timezone)
-                self._today_close = pd.to_datetime(ctp["regular"]["end"], unit="s", utc=True).tz_convert(self.timezone)
+                self._today_open = _pd.to_datetime(ctp["regular"]["start"], unit="s", utc=True).tz_convert(self.timezone)
+                self._today_close = _pd.to_datetime(ctp["regular"]["end"], unit="s", utc=True).tz_convert(self.timezone)
                 self._today_midnight = self._today_close.ceil("D")
             except Exception:
                 self._today_open = None
@@ -171,7 +170,7 @@ class FastInfo:
         if self._prices_1y.empty:
             return self._prices_1y
 
-        dnow = pd.Timestamp.utcnow().tz_convert(self.timezone).date()
+        dnow = _pd.Timestamp.utcnow().tz_convert(self.timezone).date()
         d1 = dnow
         d0 = (d1 + _datetime.timedelta(days=1)) - utils._interval_to_timedelta("1y")
         if fullDaysOnly and self._exchange_open_now():
@@ -202,7 +201,7 @@ class FastInfo:
         return self._md
 
     def _exchange_open_now(self):
-        t = pd.Timestamp.utcnow()
+        t = _pd.Timestamp.utcnow()
         self._get_exchange_metadata()
 
         # if self._today_open is None and self._today_close is None:
@@ -267,12 +266,12 @@ class FastInfo:
         if self._shares is not None:
             return self._shares
 
-        shares = self._tkr.get_shares_full(start=pd.Timestamp.utcnow().date() - pd.Timedelta(days=548))
+        shares = self._tkr.get_shares_full(start=_pd.Timestamp.utcnow().date() - _pd.Timedelta(days=548))
         if shares is None:
             # Requesting 18 months failed, so fallback to shares which should include last year
             shares = self._tkr.get_shares()
         if shares is not None:
-            if isinstance(shares, pd.DataFrame):
+            if isinstance(shares, _pd.DataFrame):
                 shares = shares[shares.columns[0]]
             self._shares = int(shares.iloc[-1])
         return self._shares
@@ -574,7 +573,7 @@ class TickerBase:
         timeout=10,
         debug=True,
         raise_errors=False,
-    ) -> pd.DataFrame:
+    ) -> _pd.DataFrame:
         """
         :Parameters:
             period : str
@@ -621,22 +620,20 @@ class TickerBase:
                 If True, then raise errors as
                 exceptions instead of printing to console.
         """
-
+        tz = self._get_ticker_tz(debug, proxy, timeout)
+        if tz is None:
+            # Every valid ticker has a timezone. Missing = problem
+            err_msg = "No timezone found, symbol may be delisted"
+            shared._DFS[self.ticker] = utils.empty_df()
+            shared._ERRORS[self.ticker] = err_msg
+            if debug:
+                if raise_errors:
+                    raise Exception("%s: %s" % (self.ticker, err_msg))
+                else:
+                    print("- %s: %s" % (self.ticker, err_msg))
+            return utils.empty_df()
         if start or period is None or period.lower() == "max":
             # Check can get TZ. Fail => probably delisted
-            tz = self._get_ticker_tz(debug, proxy, timeout)
-            if tz is None:
-                # Every valid ticker has a timezone. Missing = problem
-                err_msg = "No timezone found, symbol may be delisted"
-                shared._DFS[self.ticker] = utils.empty_df()
-                shared._ERRORS[self.ticker] = err_msg
-                if debug:
-                    if raise_errors:
-                        raise Exception("%s: %s" % (self.ticker, err_msg))
-                    else:
-                        print("- %s: %s" % (self.ticker, err_msg))
-                return utils.empty_df()
-
             if end is None:
                 end = int(_time.time())
             else:
@@ -792,30 +789,28 @@ class TickerBase:
         if not expect_capital_gains:
             capital_gains = None
 
-        if start is not None:
-            # Note: use pandas Timestamp as datetime.utcfromtimestamp has bugs on windows
-            # https://github.com/python/cpython/issues/81708
-            startDt = _pd.Timestamp(start, unit="s")
-            if dividends is not None:
-                dividends = dividends[dividends.index >= startDt]
-            if capital_gains is not None:
-                capital_gains = capital_gains[capital_gains.index >= startDt]
-            if splits is not None:
-                splits = splits[splits.index >= startDt]
-        if end is not None:
-            endDt = _pd.Timestamp(end, unit="s")
-            if dividends is not None:
-                dividends = dividends[dividends.index < endDt]
-            if capital_gains is not None:
-                capital_gains = capital_gains[capital_gains.index < endDt]
-            if splits is not None:
-                splits = splits[splits.index < endDt]
         if splits is not None:
             splits = utils.set_df_tz(splits, interval, tz_exchange)
         if dividends is not None:
             dividends = utils.set_df_tz(dividends, interval, tz_exchange)
         if capital_gains is not None:
             capital_gains = utils.set_df_tz(capital_gains, interval, tz_exchange)
+        if start is not None:
+            startDt = quotes.index[0].floor('D')
+            if dividends is not None:
+                dividends = dividends.loc[startDt:]
+            if capital_gains is not None:
+                capital_gains = capital_gains.loc[startDt:]
+            if splits is not None:
+                splits = splits.loc[startDt:]
+        if end is not None:
+            endDt = _pd.Timestamp(end, unit='s').tz_localize(tz)
+            if dividends is not None:
+                dividends = dividends[dividends.index < endDt]
+            if capital_gains is not None:
+                capital_gains = capital_gains[capital_gains.index < endDt]
+            if splits is not None:
+                splits = splits[splits.index < endDt]
 
         # Prepare for combine
         intraday = params["interval"][-1] in ("m", "h")
@@ -964,7 +959,7 @@ class TickerBase:
                 return df
 
         dts_to_repair = df.index[f_repair_rows]
-        indices_to_repair = _np.where(f_repair_rows)[0]
+        # indices_to_repair = _np.where(f_repair_rows)[0]
 
         if len(dts_to_repair) == 0:
             if debug:
@@ -978,9 +973,9 @@ class TickerBase:
 
         # Group nearby NaN-intervals together to reduce number of Yahoo fetches
         dts_groups = [[dts_to_repair[0]]]
-        last_dt = dts_to_repair[0]
-        last_ind = indices_to_repair[0]
-        td = utils._interval_to_timedelta(interval)
+        # last_dt = dts_to_repair[0]
+        # last_ind = indices_to_repair[0]
+        # td = utils._interval_to_timedelta(interval)
         # Note on setting max size: have to allow space for adding good data
         if sub_interval == "1mo":
             grp_max_size = _relativedelta.relativedelta(years=2)
@@ -1091,7 +1086,7 @@ class TickerBase:
                 df_fine["Week Start"] = df_fine.index.tz_localize(None).to_period("W-" + week_end_day).start_time
                 grp_col = "Week Start"
             elif interval == "1d":
-                df_fine["Day Start"] = pd.to_datetime(df_fine.index.date)
+                df_fine["Day Start"] = _pd.to_datetime(df_fine.index.date)
                 grp_col = "Day Start"
             else:
                 df_fine.loc[df_fine.index.isin(df_block.index), "ctr"] = 1
@@ -1355,7 +1350,7 @@ class TickerBase:
         df2_reserve = None
         if intraday:
             # Ignore days with >50% intervals containing NaNs
-            df_nans = pd.DataFrame(f_prices_bad.any(axis=1), columns=["nan"])
+            df_nans = _pd.DataFrame(f_prices_bad.any(axis=1), columns=["nan"])
             df_nans["_date"] = df_nans.index.date
             grp = df_nans.groupby("_date")
             nan_pct = grp.sum() / grp.count()
@@ -1876,7 +1871,7 @@ class TickerBase:
         self._news = data.get("news", [])
         return self._news
 
-    def get_earnings_dates(self, limit=12, proxy=None) -> Optional[pd.DataFrame]:
+    def get_earnings_dates(self, limit=12, proxy=None) -> Optional[_pd.DataFrame]:
         """
         Get earning dates (future and historic)
         :param limit: max amount of upcoming and recent earnings dates to return.
@@ -1989,7 +1984,7 @@ class TickerBase:
                 elif isinstance(v, str):
                     query1_info[k] = v.replace("\xa0", " ")
             if "firstTradeDateMilliseconds" in query1_info:
-                query1_info["firstTradeDateMilliseconds"] = pd.Timestamp(
+                query1_info["firstTradeDateMilliseconds"] = _pd.Timestamp(
                     query1_info["firstTradeDateMilliseconds"], unit="ms", tz="UTC"
                 ).tz_convert(query1_info.get("exchangeTimezoneName", "UTC"))
             self._query1_info = query1_info
