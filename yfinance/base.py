@@ -1521,7 +1521,10 @@ class TickerBase:
         try:
             data = self._quote.info
         except Exception:
-            data = self.get_query1_info()
+            data = {}
+
+        data1 = self.get_query1_info()
+        data.update(data1)
         return data
 
     @property
