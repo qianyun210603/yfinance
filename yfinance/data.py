@@ -13,6 +13,8 @@ else:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 import re
+import time
+import random
 
 import requests as requests
 from bs4 import BeautifulSoup

@@ -1512,8 +1512,8 @@ class TickerBase:
             return data
 
     def get_info(self, proxy=None) -> dict:
-        self._quote.proxy = proxy
         try:
+            self._quote.proxy = proxy
             data = self._quote.info
         except Exception:
             data = {}
