@@ -43,6 +43,7 @@ from .scrapers.holders import Holders
 from .scrapers.quote import Quote
 import json as _json
 
+_BASIC_URL_ = "https://query1.finance.yahoo.com/v7/finance/quote"
 _BASE_URL_ = 'https://query2.finance.yahoo.com'
 _SCRAPE_URL_ = 'https://finance.yahoo.com/quote'
 _ROOT_URL_ = 'https://finance.yahoo.com'
@@ -534,6 +535,7 @@ class TickerBase:
         self._fundamentals = Fundamentals(self._data)
 
         self._fast_info = FastInfo(self)
+        self._query1_info = None
 
     def stats(self, proxy=None):
         ticker_url = "{}/{}".format(self._scrape_url, self.ticker)
@@ -1471,8 +1473,13 @@ class TickerBase:
             return data
 
     def get_info(self, proxy=None) -> dict:
-        self._quote.proxy = proxy
-        data = self._quote.info
+        try:
+            self._quote.proxy = proxy
+            data = self._quote.info
+        except Exception:
+            data = {}
+        data1 = self.get_query1_info()
+        data.update(data1)
         return data
 
     @property
@@ -1910,3 +1917,25 @@ class TickerBase:
             # Request intraday data, because then Yahoo returns exchange schedule.
             self.history(period="1wk", interval="1h", prepost=True)
         return self._history_metadata
+
+    def get_query1_info(self) -> dict:
+        if self._query1_info is None:
+            result = self._data.get_raw_json(
+                _BASIC_URL_, params={"formatted": "true", "lang": "en-US", "symbols": self.ticker}
+            )
+            query1_info = next(
+                (info for info in result.get("quoteResponse", {}).get("result", []) if info["symbol"] == self.ticker),
+                None,
+            )
+            for k, v in query1_info.items():
+                if isinstance(v, dict) and "raw" in v and "fmt" in v:
+                    query1_info[k] = v["fmt"] if k in {"regularMarketTime", "postMarketTime"} else v["raw"]
+                elif isinstance(v, str):
+                    query1_info[k] = v.replace("\xa0", " ")
+            if "firstTradeDateMilliseconds" in query1_info:
+                query1_info["firstTradeDateMilliseconds"] = _pd.Timestamp(
+                    query1_info["firstTradeDateMilliseconds"], unit="ms", tz="UTC"
+                ).tz_convert(query1_info.get("exchangeTimezoneName", "UTC"))
+            self._query1_info = query1_info
+
+        return self._query1_info
